@@ -4,9 +4,11 @@
 import AdvancedHTMLParser
 import urllib
 import sexmachine.detector
+from textblob import TextBlob
 from DateFormatter import DateFormatter
 
 import sys, re
+from textblob.exceptions import NotTranslated
 
 reload(sys)
 sys.setdefaultencoding('utf8')
@@ -106,7 +108,6 @@ class PersonGeneratorService:
 
         for _property in infobox.getChildren():
             try:
-                #print ('PUSHKIN')
                 _property.getElementsByAttr('title', 'Alma mater')[0]
                 for alma_mater in _property.getChildren()[1].getChildren():
                     if len(alma_mater.getChildren()) > 0 and len(re.sub(r'\([^)]*\)', '', alma_mater.innerHTML)) > 0:
@@ -116,8 +117,11 @@ class PersonGeneratorService:
                         if len(value) > 0:
                             self.alma_mater.append(value)
             except IndexError:
-                #print "INDEX ERROR"
-                pass
+                th = _property.getChildren()[0]
+                if th.innerHTML == 'Alma mater' or th.innerHTML == 'Alma&#160;mater':
+                    td = _property.getChildren()[1]
+                    for i in td:
+                        self.alma_mater.append(i.innerHTML)
 
     def get_occupation(self, infobox):
         for _property in infobox.getChildren():
@@ -125,6 +129,8 @@ class PersonGeneratorService:
                 for occupation in _property.getChildren()[1].getChildren():
                     if len(occupation.innerHTML) > 0:
                         self.occupation.append(occupation.innerHTML.lower())
+                if len(_property.getChildren()[1].getChildren()) == 0:
+                    self.occupation = _property.getChildren()[1].innerHTML.lower().split(', ')
             elif _property.getChildren()[0].innerHTML == 'Occupation':
                 for occupation in _property.getChildren()[1].getChildren():
                     if len(occupation.innerHTML) > 0:
@@ -146,6 +152,7 @@ class PersonGeneratorService:
             self.write_alma_mater(scs_file)
         if len(self.occupation) > 0:
             self.write_occupation(scs_file)
+        self.write_main_statement(scs_file)
 
     def write_name(self, scs_file):
         # full name
@@ -177,7 +184,7 @@ class PersonGeneratorService:
         if self.full_name['ru'] is not None:
             scs_file.write('    ' + '=> nrel_main_idtf:' + '\n')
             scs_file.write('    ' + ' [' + self.full_name['ru'] + ' - Изображение](* <- lang_ru;; *);;' + '\n')
-        scs_file.write('    ' + '<-sc_statement;;' + '\n')
+        scs_file.write('    ' + '<-sc_illustration;;' + '\n')
         scs_file.write('    ' + '<= nrel_sc_text_translation: ...' + '\n')
         scs_file.write(2*'    ' + '(*' + '\n')
         scs_file.write(2*'    ' + '->rrel_example:' + '"file://content/' + self.image_name + '"(* <-image;; *);;' + '\n')
@@ -210,38 +217,94 @@ class PersonGeneratorService:
         year = split_date[0]
         scs_file.write(self.system_name + ' => nrel_date_of_death: ' + self.death_date + '\n')
         scs_file.write('    (*' + '\n')
-        scs_file.write('    -> rrel_example:' + '\n')
+        scs_file.write('    => nrel_main_idtf:' + '\n')
         scs_file.write('    [' + en_month + ' ' + day + ', ' + year + '](* <- lang_en;; *);' + '\n')
         scs_file.write('    [' + day + ' ' + ru_month + ', ' + year + '](* <- lang_ru;; *);;' + '\n')
         scs_file.write('    *);;' + '\n')
 
     def write_alma_mater(self, scs_file):
-        scs_file.write(self.system_name + ' <= nrel_student: ' + '\n')
         for i in self.alma_mater:
-            '_'.join(i.split(' '))
-            scs_file.write('    ' + '_'.join(i.split(' ')) + '\n')
-            scs_file.write(2*'    ' + '(*' + '\n')
-            scs_file.write(2*'    ' + '=> nrel_main_idtf:' + '\n')
-            scs_file.write(3*'    ' + '[' + i + '](* <- lang_en;; *);;' + '\n')
-            scs_file.write(2*'    ' + '*);')
-            if self.alma_mater.index(i) == len(self.alma_mater) - 1:
-                scs_file.write(';')
-            scs_file.write('\n')
+            print i, type(i)
+            blob = TextBlob(i)
+            try:
+                ru_i = str(blob.translate('en', 'ru'))
+                '_'.join(i.split(' '))
+                scs_file.write(self.system_name + ' <= nrel_student: ' + '\n')
+                scs_file.write('    ' + '_'.join(i.split(' ')) + '\n')
+                scs_file.write(2*'    ' + '(*' + '\n')
+                scs_file.write(2*'    ' + '=> nrel_main_idtf:' + '\n')
+                scs_file.write(3*'    ' + '[' + i + '](* <- lang_en;; *);' + '\n')
+                scs_file.write(3*'    ' + '[' + ru_i + '](* <- lang_ru;; *);;' + '\n')
+                scs_file.write(2*'    ' + '*);;')
+                scs_file.write('\n')
+            except NotTranslated:
+                pass
 
     def write_occupation(self, scs_file):
         scs_file.write(self.system_name + ' <- ' + '\n')
         for i in self.occupation:
-            scs_file.write('    ' + '_'.join(i.split(' ')).lower() + '\n')
-            scs_file.write(2*'    ' + '(*' + '\n')
-            scs_file.write(2*'    ' + '=> nrel_main_idtf:' + '\n')
-            scs_file.write(3*'    ' + '[' + i.lower() + '](* <- lang_en;; *);;' + '\n')
-            scs_file.write(2*'    ' + '*);')
-            if self.occupation.index(i) == len(self.occupation) - 1:
-                scs_file.write(';')
-            scs_file.write('\n')
-        pass
+            blob = TextBlob(i)
+            try:
+                ru_i = str(blob.translate('en', 'ru')).lower()
+                scs_file.write('    ' + '_'.join(i.split(' ')).lower() + '\n')
+                scs_file.write(2*'    ' + '(*' + '\n')
+                scs_file.write(2*'    ' + '=> nrel_main_idtf:' + '\n')
+                scs_file.write(3*'    ' + '[' + i.lower() + '](* <- lang_en;; *);' + '\n')
+                scs_file.write(3*'    ' + '[' + ru_i + '](* <- lang_ru;; *);;' + '\n')
+                scs_file.write(2*'    ' + '*);')
+                if self.occupation.index(i) == len(self.occupation) - 1:
+                    scs_file.write(';')
+                scs_file.write('\n')
+            except NotTranslated:
+                pass
 
-person = PersonGeneratorService("https://en.wikipedia.org/wiki/Alexander_Pushkin")
+    def write_main_statement(self, scs_file):
+        a = self.RU_HTML.getElementById('mw-content-text')
+
+        for child in a.getChildren():
+            def get_rid_of_parentheses(text, first_symbol, last_symbol):
+                split_text = text.split(last_symbol, 1)
+                subtext = split_text[0].rsplit(first_symbol, 1)
+                return subtext[0]+split_text[1]
+
+            if child.getTagName() == 'p':
+                text = child.innerHTML
+                while True:
+                    try:
+                        text = get_rid_of_parentheses(text, '(', ')')
+                    except IndexError:
+                        break
+                while True:
+                    try:
+                        text = get_rid_of_parentheses(text, '<', '>')
+                    except IndexError:
+                        break
+                while True:
+                    try:
+                        text = get_rid_of_parentheses(text, '[', ']')
+                    except IndexError:
+                        break
+                text = text.replace('́', '')
+                text = text.replace('&#160;', '')
+
+                print text
+
+                scs_file.write(self.system_name + ' <- rrel_key_sc_element:' + '\n')
+                scs_file.write('    ' + self.system_name + '_Main_Information (*' + '\n')
+                scs_file.write('    ' + '=> nrel_main_idtf:' + '\n')
+                scs_file.write('    ' + ' [' + self.full_name['en'] + ' - Main Information](* <- lang_en;; *);;' + '\n')
+                if self.full_name['ru'] is not None:
+                    scs_file.write('    ' + '=> nrel_main_idtf:' + '\n')
+                    scs_file.write('    ' + ' [' + self.full_name['ru'] + ' - Основная информация](* <- lang_ru;; *);;' + '\n')
+                scs_file.write('    ' + '<-sc_statement;;' + '\n')
+                scs_file.write('    ' + '<= nrel_sc_text_translation: ...' + '\n')
+                scs_file.write(2*'    ' + '(*' + '\n')
+                scs_file.write(2*'    ' + '->rrel_example: [' + text + '](* <-lang_ru;; *);;' + '\n')
+                scs_file.write(2*'    ' + '*);;' + '\n')
+                scs_file.write('*);;' + '\n')
+                break
+
+person = PersonGeneratorService("https://en.wikipedia.org/wiki/Stephen_Hawking")
 person.get_full_name(person.EN_HTML, person.RU_HTML)
 person.get_image(person.en_infobox)
 person.get_gender()
@@ -251,3 +314,4 @@ person.get_alma_mater(person.en_infobox)
 person.get_occupation(person.en_infobox)
 person.generate_scs_file()
 
+#re.sub(r'\([^)]*\)', '', i.innerHTML)
