@@ -1,7 +1,15 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import AdvancedHTMLParser
 import urllib
 import sexmachine.detector
 from DateFormatter import DateFormatter
+
+import sys, re
+
+reload(sys)
+sys.setdefaultencoding('utf8')
 '''
 This service creates .scs file using wiki-url
 '''
@@ -12,13 +20,24 @@ class PersonGeneratorService:
     SAVE_PATH = "/home/overlord/ostis/kb/Persons/"
 
     def __init__(self, wiki_url):
-        wiki_parser = AdvancedHTMLParser.AdvancedHTMLParser()
-        wiki_parser.parseStr(urllib.urlopen(wiki_url).read())
-        self.infobox = wiki_parser.getElementsByClassName('infobox')[0]
+        self.EN_HTML = AdvancedHTMLParser.AdvancedHTMLParser()
+        self.EN_HTML.parseStr(urllib.urlopen(wiki_url).read())
+        try:
+            self.RU_HTML = AdvancedHTMLParser.AdvancedHTMLParser()
+            ru_href_container = self.EN_HTML.getElementsByClassName('interwiki-ru')[0]
+            ru_url = 'https:' + ru_href_container.getChildren()[0].getAttribute('href')
+            self.RU_HTML.parseStr(urllib.urlopen(ru_url).read())
+            self.ru_infobox = self.RU_HTML.getElementsByClassName('infobox')[0]
+        except IndexError:
+            self.RU_HTML = None
+            self.ru_infobox = None
+        # ============================================================================
+        self.en_infobox = self.EN_HTML.getElementsByClassName('infobox')[0]
         self.system_name = None
-        self.full_name = None
-        self.first_name = None
-        self.last_name = None
+        self.full_name = {'en': None, 'ru': None}
+        self.first_name = {'en': None, 'ru': None}
+        self.last_name = {'en': None, 'ru': None}
+        self.patronimic_name = {'en': None, 'ru': None}
         self.gender = None
         self.image_path = None
         self.image_name = None
@@ -27,12 +46,27 @@ class PersonGeneratorService:
         self.alma_mater = []
         self.occupation = []
 
-    def get_full_name(self, infobox):
-        self.full_name = infobox.getChildren()[0].getElementsByClassName('fn')[0].innerHTML
-        split_full_name = self.full_name.split(' ')
-        self.system_name = '_'.join(split_full_name)
-        self.first_name = split_full_name[0]
-        self.last_name = ' '.join(split_full_name[1:])
+    def get_full_name(self, en_html, ru_html):
+        self.full_name['en'] = en_html.getElementById('firstHeading').innerHTML
+        split_en_full_name = self.full_name['en'].split(' ')
+        self.system_name = '_'.join(split_en_full_name)
+        self.first_name['en'] = split_en_full_name[0]
+        self.last_name['en'] = ' '.join(split_en_full_name[1:])
+
+        try:
+            self.full_name['ru'] = ru_html.getElementById('firstHeading').innerHTML
+            self.full_name['ru'] = ''.join(x for x in self.full_name['ru'] if x not in ',')
+            split_ru_full_name = self.full_name['ru'].split(',')
+            self.last_name['ru'] = split_ru_full_name[0]
+            split_ru_full_name = split_ru_full_name[1].split(' ')
+            if split_ru_full_name[-1].endswith('ович') or split_ru_full_name[-1].endswith('евич')\
+                or split_ru_full_name[-1].endswith('овна') or split_ru_full_name[-1].endswith('евна'):
+                self.patronimic_name['ru'] = ' '.join(split_ru_full_name[-1])
+                self.first_name['ru'] = ' '.join(split_ru_full_name[-2:])
+            else:
+                self.first_name['ru'] = ' '.join(split_ru_full_name[-1:])
+        except AttributeError:
+            pass
 
     def get_image(self, infobox):
         image = infobox.getElementsByClassName('image')[0]
@@ -44,7 +78,7 @@ class PersonGeneratorService:
             urllib.urlretrieve('https:' + image_url, self.image_path)
 
     def get_gender(self):
-        self.gender = sexmachine.detector.Detector().get_gender(self.first_name)
+        self.gender = sexmachine.detector.Detector().get_gender(self.first_name['en'])
 
     def get_birth_date(self, infobox):
         for _property in infobox.getChildren():
@@ -61,13 +95,28 @@ class PersonGeneratorService:
                 break
 
     def get_alma_mater(self, infobox):
+
+        def get_inside(arg):
+            for i in arg.getChildren():
+                value = re.sub(r'\([^)]*\)', '', i.innerHTML)
+                if len(i.getChildren()) > 0 and len(value) > 0:
+                    get_inside(i)
+                elif len(value) > 0:
+                    self.alma_mater.append(value)
+
         for _property in infobox.getChildren():
             try:
+                #print ('PUSHKIN')
                 _property.getElementsByAttr('title', 'Alma mater')[0]
                 for alma_mater in _property.getChildren()[1].getChildren():
-                    if len(alma_mater.innerHTML) != 0:
-                        self.alma_mater.append(alma_mater.innerHTML)
+                    if len(alma_mater.getChildren()) > 0:
+                        get_inside(alma_mater)
+                    else:
+                        value = re.sub(r'\([^)]*\)', '', alma_mater.innerHTML)
+                        if len(value) > 0:
+                            self.alma_mater.append(value)
             except IndexError:
+                #print "INDEX ERROR"
                 pass
 
     def get_occupation(self, infobox):
@@ -92,24 +141,35 @@ class PersonGeneratorService:
             self.write_occupation(scs_file)
 
     def write_name(self, scs_file):
-        # full name generation
+        # full name
         scs_file.write(self.system_name + ' => nrel_main_idtf:' + '\n')
-        scs_file.write('   [' + self.full_name + '](* <- lang_en;; *);;' + '\n')
-        # first name generation
+        scs_file.write('   [' + self.full_name['en'] + '](* <- lang_en;; *);;' + '\n')
+        if self.full_name['ru'] is not None:
+            scs_file.write(self.system_name + ' => nrel_main_idtf:' + '\n')
+            scs_file.write('   [' + self.full_name['ru'] + '](* <- lang_ru;; *);;' + '\n')
+        # first name
         scs_file.write(self.system_name + ' => nrel_first_name:' + '\n')
-        scs_file.write('    name_' + self.first_name + '(*' + '\n')
-        scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.first_name + '](* <- lang_en;; *);;' + '\n')
+        scs_file.write('    name_' + self.first_name['en'] + '(*' + '\n')
+        scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.first_name['en'] + '](* <- lang_en;; *);;' + '\n')
+        if self.first_name['ru'] is not None:
+            scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.first_name['ru'] + '](* <- lang_ru;; *);;' + '\n')
         scs_file.write(2*'    ' + '*);;' + '\n')
-        # last name generation
+        # last name
         scs_file.write(self.system_name + ' => nrel_surname:' + '\n')
-        scs_file.write('    surname_' + self.last_name + '(*' + '\n')
-        scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.last_name + '](* <- lang_en;; *);;' + '\n')
+        scs_file.write('    surname_' + self.last_name['en'] + '(*' + '\n')
+        scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.last_name['en'] + '](* <- lang_en;; *);;' + '\n')
+        if self.last_name['ru'] is not None:
+            scs_file.write(2*'    ' + ' => nrel_main_idtf: [' + self.last_name['ru'] + '](* <- lang_ru;; *);;' + '\n')
         scs_file.write(2*'    ' + '*);;' + '\n')
 
     def write_person_image(self, scs_file):
         scs_file.write(self.system_name + ' <- rrel_key_sc_element:' + '\n')
         scs_file.write('    ' + self.system_name + '_Image (*' + '\n')
-        scs_file.write('    ' + '=> nrel_main_idtf: [Image of ' + self.full_name + '](* <- lang_en;; *);;' + '\n')
+        scs_file.write('    ' + '=> nrel_main_idtf:' + '\n')
+        scs_file.write('    ' + ' [Image of ' + self.full_name['en'] + '](* <- lang_en;; *);;' + '\n')
+        if self.full_name['ru'] is not None:
+            scs_file.write('    ' + '=> nrel_main_idtf:' + '\n')
+            scs_file.write('    ' + ' [' + self.full_name['ru'] + ' - Изображение](* <- lang_ru;; *);;' + '\n')
         scs_file.write('    ' + '<-sc_statement;;' + '\n')
         scs_file.write('    ' + '<= nrel_sc_text_translation: ...' + '\n')
         scs_file.write(2*'    ' + '(*' + '\n')
@@ -124,22 +184,28 @@ class PersonGeneratorService:
         date_formatter = DateFormatter()
         split_date = self.birth_date.split('_')
         day = split_date[2]
-        month = date_formatter.get_str_month(split_date[1])
+        en_month = date_formatter.get_str_month(split_date[1], 'en')
+        ru_month = date_formatter.get_str_month(split_date[1], 'ru')
         year = split_date[0]
         scs_file.write(self.system_name + ' => nrel_date_of_birth: ' + self.birth_date + '\n')
         scs_file.write('    (*' + '\n')
-        scs_file.write('    [' + month + ' ' + day + ', ' + year + '](* <- lang_en;; *);;' + '\n')
+        scs_file.write('    => nrel_main_idtf:' + '\n')
+        scs_file.write('    [' + en_month + ' ' + day + ', ' + year + '](* <- lang_en;; *);' + '\n')
+        scs_file.write('    [' + day + ' ' + ru_month + ', ' + year + '](* <- lang_ru;; *);;' + '\n')
         scs_file.write('    *);;' + '\n')
 
     def write_death_date(self, scs_file):
         date_formatter = DateFormatter()
         split_date = self.death_date.split('_')
         day = split_date[2]
-        month = date_formatter.get_str_month(split_date[1])
+        en_month = date_formatter.get_str_month(split_date[1], 'en')
+        ru_month = date_formatter.get_str_month(split_date[1], 'ru')
         year = split_date[0]
         scs_file.write(self.system_name + ' => nrel_date_of_death: ' + self.death_date + '\n')
         scs_file.write('    (*' + '\n')
-        scs_file.write('    [' + month + ' ' + day + ', ' + year + '](* <- lang_en;; *);;' + '\n')
+        scs_file.write('    -> rrel_example:' + '\n')
+        scs_file.write('    [' + en_month + ' ' + day + ', ' + year + '](* <- lang_en;; *);' + '\n')
+        scs_file.write('    [' + day + ' ' + ru_month + ', ' + year + '](* <- lang_ru;; *);;' + '\n')
         scs_file.write('    *);;' + '\n')
 
     def write_alma_mater(self, scs_file):
@@ -168,13 +234,13 @@ class PersonGeneratorService:
             scs_file.write('\n')
         pass
 
-person = PersonGeneratorService("https://en.wikipedia.org/wiki/Kwame_Raoul")
-person.get_full_name(person.infobox)
-person.get_image(person.infobox)
+person = PersonGeneratorService("https://en.wikipedia.org/wiki/Barack_Obama")
+person.get_full_name(person.EN_HTML, person.RU_HTML)
+person.get_image(person.en_infobox)
 person.get_gender()
-person.get_birth_date(person.infobox)
-person.get_death_date(person.infobox)
-person.get_alma_mater(person.infobox)
-person.get_occupation(person.infobox)
+person.get_birth_date(person.en_infobox)
+person.get_death_date(person.en_infobox)
+person.get_alma_mater(person.en_infobox)
+person.get_occupation(person.en_infobox)
 person.generate_scs_file()
 
