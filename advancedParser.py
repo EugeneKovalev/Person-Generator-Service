@@ -55,7 +55,6 @@ class PersonGeneratorService:
 
         try:
             self.full_name['ru'] = ru_html.getElementById('firstHeading').innerHTML
-            self.full_name['ru'] = ''.join(x for x in self.full_name['ru'] if x not in ',')
             split_ru_full_name = self.full_name['ru'].split(',')
             self.last_name['ru'] = split_ru_full_name[0]
             split_ru_full_name = split_ru_full_name[1].split(' ')
@@ -65,6 +64,7 @@ class PersonGeneratorService:
                 self.first_name['ru'] = ' '.join(split_ru_full_name[-2:])
             else:
                 self.first_name['ru'] = ' '.join(split_ru_full_name[-1:])
+            self.full_name['ru'] = ''.join(x for x in self.full_name['ru'] if x not in ',')
         except AttributeError:
             pass
 
@@ -109,7 +109,7 @@ class PersonGeneratorService:
                 #print ('PUSHKIN')
                 _property.getElementsByAttr('title', 'Alma mater')[0]
                 for alma_mater in _property.getChildren()[1].getChildren():
-                    if len(alma_mater.getChildren()) > 0:
+                    if len(alma_mater.getChildren()) > 0 and len(re.sub(r'\([^)]*\)', '', alma_mater.innerHTML)) > 0:
                         get_inside(alma_mater)
                     else:
                         value = re.sub(r'\([^)]*\)', '', alma_mater.innerHTML)
@@ -121,10 +121,17 @@ class PersonGeneratorService:
 
     def get_occupation(self, infobox):
         for _property in infobox.getChildren():
-            if _property.getChildren()[0].innerHTML == ('Profession' or 'Occupation'):
+            if _property.getChildren()[0].innerHTML == 'Profession':
                 for occupation in _property.getChildren()[1].getChildren():
-                    self.occupation.append(occupation.innerHTML)
-
+                    if len(occupation.innerHTML) > 0:
+                        self.occupation.append(occupation.innerHTML.lower())
+            elif _property.getChildren()[0].innerHTML == 'Occupation':
+                for occupation in _property.getChildren()[1].getChildren():
+                    if len(occupation.innerHTML) > 0:
+                        self.occupation.append(occupation.innerHTML.lower())
+                if len(_property.getChildren()[1].getChildren()) == 0:
+                    self.occupation = _property.getChildren()[1].innerHTML.lower().split(', ')
+                    
     def generate_scs_file(self):
         scs_file = open(self.SAVE_PATH + self.system_name + '.scs', 'w')
         self.write_name(scs_file)
@@ -234,7 +241,7 @@ class PersonGeneratorService:
             scs_file.write('\n')
         pass
 
-person = PersonGeneratorService("https://en.wikipedia.org/wiki/Barack_Obama")
+person = PersonGeneratorService("https://en.wikipedia.org/wiki/Alexander_Pushkin")
 person.get_full_name(person.EN_HTML, person.RU_HTML)
 person.get_image(person.en_infobox)
 person.get_gender()
